@@ -50,13 +50,10 @@ BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
 		this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processInformation.dwProcessId);
 		this->isDebuggerActive = true;
 		this->processID = processInformation.dwProcessId;
-
-		//MessageBox(NULL, "Successfully loaded process.", "Success", MB_OK | MB_ICONINFORMATION);
 		return TRUE;
 	}
 	else
 	{
-		//MessageBox(NULL, "Error loading process. Check the parameters.", "Error", MB_OK | MB_ICONERROR);
 		return FALSE;
 	}
 }
@@ -69,13 +66,10 @@ BOOL Debugger::attachProcess(UINT pid)
 	{
 		this->isDebuggerActive = TRUE;
 		this->processID = pid;
-
-		//MessageBox(NULL, "Successfully attached process.", "Success", MB_OK | MB_ICONINFORMATION);
 		return TRUE;
 	}
 	else
 	{
-		//MessageBox(NULL, "Error attaching process. Check the pid.", "Error", MB_OK | MB_ICONERROR);
 		return FALSE;
 	}
 }
@@ -85,12 +79,56 @@ BOOL Debugger::detachProcess()
 	if (DebugActiveProcessStop(this->processID))
 	{
 		this->isDebuggerActive = FALSE;
-		//MessageBox(NULL, "Successfully detached from process.", "Success", MB_OK | MB_ICONINFORMATION);
 		return TRUE;
 	}
 	else
 	{
-		//MessageBox(NULL, "Error detaching from process.", "Error", MB_OK | MB_ICONERROR);
 		return FALSE;
+	}
+}
+
+UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray)
+{
+	UINT threadNumber = 0;
+	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, this->processID);
+	if (snapshot)
+	{
+		THREADENTRY32 threadEntry;
+		threadEntry.dwSize = sizeof(threadEntry);
+		BOOL success = Thread32First(snapshot, &threadEntry);
+		while (success)
+		{
+			if (threadEntry.th32OwnerProcessID == this->processID)
+			{
+				threadNumber++;
+				// Dynamically add an element to the array of thread entry.
+				// /!\ Experimental
+				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadNumber];
+				memcpy_s(tempThreadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32), threadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32));
+				tempThreadEntryArray[threadNumber - 1] = threadEntry;
+				delete[] threadEntryArray;
+				threadEntryArray = tempThreadEntryArray;
+			}
+			success = Thread32Next(snapshot, &threadEntry);
+		}
+		CloseHandle(snapshot);
+	}
+	return threadNumber;
+}
+
+LPCONTEXT Debugger::getThreadContext(UINT threadID)
+{
+	CONTEXT context;
+	context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
+
+	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
+	if (GetThreadContext(hThread, &context))
+	{
+		CloseHandle(hThread);
+		return &context;
+	}
+	else
+	{
+		return NULL;
 	}
 }
