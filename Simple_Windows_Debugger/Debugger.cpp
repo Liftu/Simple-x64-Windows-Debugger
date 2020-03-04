@@ -28,9 +28,51 @@ VOID Debugger::getDebugEvent()
 	DEBUG_EVENT debugEvent;
 	if (WaitForDebugEvent(&debugEvent, INFINITE))
 	{
-		this->isDebuggerActive = FALSE;
+		DWORD continueStatus = DBG_CONTINUE;
+		HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, debugEvent.dwThreadId);
+		LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
+
+		//std::cout << "Event code : " << debugEvent.dwDebugEventCode << std::endl;
+
+		if (debugEvent.dwDebugEventCode == EXCEPTION_DEBUG_EVENT)
+		{
+			DWORD exceptionCode = debugEvent.u.Exception.ExceptionRecord.ExceptionCode;
+			PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
+
+			if (exceptionCode == EXCEPTION_ACCESS_VIOLATION)
+			{
+				//std::cout << "Exception access violation at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+			}
+			else if (exceptionCode == EXCEPTION_BREAKPOINT)
+			{	// This exception is for soft breakpoints
+				//std::cout << "Exception breakpoint at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+				continueStatus = this->breakpointExceptionHandler();
+			}
+			else if (exceptionCode == EXCEPTION_GUARD_PAGE)
+			{	// This exception is for memory breakpoints
+				//std::cout << "Exception guard page at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+			}
+			else if (exceptionCode == EXCEPTION_SINGLE_STEP)
+			{	// This exception is for hardware breakpoints
+				//std::cout << "Exception single step at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+			}
+			else
+			{
+				//std::cout << "Exception not handled at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+			}
+		}
+		else if (debugEvent.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
+		{
+			this->isDebuggerActive = FALSE;
+		}
+
 		ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, DBG_CONTINUE);
 	}
+}
+
+DWORD Debugger::breakpointExceptionHandler()
+{
+	return DBG_CONTINUE;
 }
 
 BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
@@ -102,7 +144,6 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 			{
 				threadNumber++;
 				// Dynamically add an element to the array of thread entry.
-				// /!\ Experimental
 				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadNumber];
 				memcpy_s(tempThreadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32), *threadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32));
 				tempThreadEntryArray[threadNumber - 1] = threadEntry;
@@ -118,14 +159,15 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 
 LPCONTEXT Debugger::getThreadContext(UINT threadID)
 {
-	CONTEXT context;
-	context.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
-
 	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
-	if (GetThreadContext(hThread, &context))
+
+	CONTEXT threadContext;
+	threadContext.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
+
+	if (GetThreadContext(hThread, &threadContext))
 	{
 		CloseHandle(hThread);
-		return &context;
+		return &threadContext;
 	}
 	else
 	{

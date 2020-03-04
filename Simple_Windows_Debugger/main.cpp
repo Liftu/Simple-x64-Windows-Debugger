@@ -20,16 +20,15 @@ void attach()
 
 void load()
 {
-	if (debugger.loadProcess("C:\\Windows\\System32\\calc.exe", NULL))
+	if (debugger.loadProcess("C:\\Users\\louis\\source\\repos\\Test_C\\Release\\Test_C.exe", NULL))
 	{
 		std::cout << "process loaded " << std::endl;
 	}
 }
 
-void dumpthreadRegisters()
+void dumpThreadRegisters()
 {
 	THREADENTRY32* threadEntries = new THREADENTRY32[0];
-	// To be debug !!
 	UINT nbThreads = debugger.enumerateThreads(&threadEntries);
 
 	for (int i = 0; i < nbThreads; i++)
@@ -53,9 +52,9 @@ int main(int argc, char* argv[])
 	
 	//load();
 	attach();
-	//debugger.runProcess();
+	debugger.runProcess();
 
-	dumpthreadRegisters();
+	//dumpThreadRegisters();
 
 	debugger.detachProcess();
 
