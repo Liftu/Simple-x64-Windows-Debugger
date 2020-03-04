@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include <iostream>
+#include <iomanip>
 #include <tlhelp32.h>
 
 #include "Debugger.h"
@@ -25,6 +26,27 @@ void load()
 	}
 }
 
+void dumpthreadRegisters()
+{
+	THREADENTRY32* threadEntries = new THREADENTRY32[0];
+	// To be debug !!
+	UINT nbThreads = debugger.enumerateThreads(&threadEntries);
+
+	for (int i = 0; i < nbThreads; i++)
+	{
+		CONTEXT* thread = debugger.getThreadContext(threadEntries[i].th32ThreadID);
+		std::cout << "[*] Dumping registers for thread ID: " << threadEntries[i].th32ThreadID << std::endl << std::hex;
+		std::cout << "[*] RIP: 0x" << std::setfill('0') << std::setw(12) << thread->Rip << std::endl;
+		std::cout << "[*] RSP: 0x" << std::setfill('0') << std::setw(12) << thread->Rsp << std::endl;
+		std::cout << "[*] RBP: 0x" << std::setfill('0') << std::setw(12) << thread->Rbp << std::endl;
+		std::cout << "[*] RAX: 0x" << std::setfill('0') << std::setw(12) << thread->Rax << std::endl;
+		std::cout << "[*] RBX: 0x" << std::setfill('0') << std::setw(12) << thread->Rbx << std::endl;
+		std::cout << "[*] RCX: 0x" << std::setfill('0') << std::setw(12) << thread->Rcx << std::endl;
+		std::cout << "[*] RDX: 0x" << std::setfill('0') << std::setw(12) << thread->Rdx << std::endl;
+		std::cout << "[*] End dump." << std::endl << std::endl << std::dec;
+	}
+}
+
 int main(int argc, char* argv[])
 {
 	debugger = Debugger();
@@ -33,23 +55,7 @@ int main(int argc, char* argv[])
 	attach();
 	//debugger.runProcess();
 
-	THREADENTRY32* threadEntries = new THREADENTRY32[0];
-	// To be debug !!
-	UINT nbThreads = debugger.enumerateThreads(threadEntries);
-
-	for (int i = 0; i < nbThreads; i++)
-	{
-		CONTEXT* thread = debugger.getThreadContext(threadEntries[i].th32ThreadID);
-		std::cout << "[*] Dumping registers for thread ID: " << threadEntries[i].th32ThreadID << std::endl;
-		std::cout << "[*] RIP: " << thread->Rip << std::endl;
-		std::cout << "[*] RSP: " << thread->Rsp << std::endl;
-		std::cout << "[*] RBP: " << thread->Rbp << std::endl;
-		std::cout << "[*] RAX: " << thread->Rax << std::endl;
-		std::cout << "[*] RBX: " << thread->Rbx << std::endl;
-		std::cout << "[*] RCX: " << thread->Rcx << std::endl;
-		std::cout << "[*] RDX: " << thread->Rdx << std::endl;
-		std::cout << "[*] End dump." << std::endl;
-	}
+	dumpthreadRegisters();
 
 	debugger.detachProcess();
 

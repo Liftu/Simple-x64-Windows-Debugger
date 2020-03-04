@@ -13,7 +13,7 @@ public:
 	BOOL loadProcess(LPCTSTR executablePath, LPTSTR arguments);
 	BOOL attachProcess(UINT pid);
 	BOOL detachProcess();
-	UINT enumerateThreads(THREADENTRY32* threadEntryArray);
+	UINT enumerateThreads(THREADENTRY32* threadEntryArray[]);
 	LPCONTEXT getThreadContext(UINT threadID);
 
 private:

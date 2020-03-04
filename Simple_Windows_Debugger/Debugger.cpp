@@ -87,7 +87,7 @@ BOOL Debugger::detachProcess()
 	}
 }
 
-UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray)
+UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 {
 	UINT threadNumber = 0;
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, this->processID);
@@ -104,10 +104,10 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray)
 				// Dynamically add an element to the array of thread entry.
 				// /!\ Experimental
 				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadNumber];
-				memcpy_s(tempThreadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32), threadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32));
+				memcpy_s(tempThreadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32), *threadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32));
 				tempThreadEntryArray[threadNumber - 1] = threadEntry;
-				delete[] threadEntryArray;
-				threadEntryArray = tempThreadEntryArray;
+				delete[] *threadEntryArray;
+				*threadEntryArray = tempThreadEntryArray;
 			}
 			success = Thread32Next(snapshot, &threadEntry);
 		}
