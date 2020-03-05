@@ -18,6 +18,7 @@ public:
 
 private:
 	VOID getDebugEvent();
+	DWORD breakpointExceptionHandler();
 
 	BOOL isDebuggerActive;
 	UINT processID;
