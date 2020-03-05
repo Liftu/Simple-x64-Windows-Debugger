@@ -29,8 +29,8 @@ VOID Debugger::getDebugEvent()
 	if (WaitForDebugEvent(&debugEvent, INFINITE))
 	{
 		DWORD continueStatus = DBG_CONTINUE;
-		HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, debugEvent.dwThreadId);
-		LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
+		//HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, debugEvent.dwThreadId);
+		//LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
 
 		//std::cout << "Event code : " << debugEvent.dwDebugEventCode << std::endl;
 
@@ -45,8 +45,7 @@ VOID Debugger::getDebugEvent()
 			}
 			else if (exceptionCode == EXCEPTION_BREAKPOINT)
 			{	// This exception is for soft breakpoints
-				//std::cout << "Exception breakpoint at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
-				continueStatus = this->breakpointExceptionHandler();
+				continueStatus = this->softwareBreakpointExceptionHandler(debugEvent.dwThreadId, exceptionAddress);
 			}
 			else if (exceptionCode == EXCEPTION_GUARD_PAGE)
 			{	// This exception is for memory breakpoints
@@ -70,8 +69,18 @@ VOID Debugger::getDebugEvent()
 	}
 }
 
-DWORD Debugger::breakpointExceptionHandler()
+#include <iostream>//
+DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
 {
+	std::cout << std::hex << " Exception breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+
+	if (this->softwareBreakpoints.count(exceptionAddress))
+	{
+		// We restore the changed byte and delete the breakpoint.
+		this->delSoftwareBreakpoint(exceptionAddress);
+		// We have to go back of 1 byte backward because the INT3 instruction got executed.
+		this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress);
+	}
 	return DBG_CONTINUE;
 }
 
@@ -100,7 +109,7 @@ BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
 	}
 }
 
-BOOL Debugger::attachProcess(UINT pid)
+BOOL Debugger::attachProcess(DWORD pid)
 {
 	this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
 	
@@ -157,7 +166,7 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 	return threadNumber;
 }
 
-LPCONTEXT Debugger::getThreadContext(UINT threadID)
+LPCONTEXT Debugger::getThreadContext(DWORD threadID)
 {
 	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
 
@@ -173,4 +182,112 @@ LPCONTEXT Debugger::getThreadContext(UINT threadID)
 	{
 		return NULL;
 	}
+}
+
+BOOL Debugger::setThreadContext(DWORD threadID, LPCONTEXT threadContext)
+{
+	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
+	
+	if (SetThreadContext(hThread, threadContext))
+	{
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
+	}
+}
+
+BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, DWORD64 value)
+{
+	LPCONTEXT threadContext = this->getThreadContext(threadID);
+
+	if (_stricmp(reg, "RAX") == 0)		threadContext->Rax = value;
+	else if (_stricmp(reg, "RBX") == 0)	threadContext->Rbx = value;
+	else if (_stricmp(reg, "RCX") == 0)	threadContext->Rcx = value;
+	else if (_stricmp(reg, "RDX") == 0)	threadContext->Rdx = value;
+	else if (_stricmp(reg, "RSI") == 0)	threadContext->Rsi = value;
+	else if (_stricmp(reg, "RDI") == 0)	threadContext->Rdi = value;
+	else if (_stricmp(reg, "RSP") == 0)	threadContext->Rsp = value;
+	else if (_stricmp(reg, "RBP") == 0)	threadContext->Rbp = value;
+	else if (_stricmp(reg, "RIP") == 0)	threadContext->Rip = value;
+	else if (_stricmp(reg, "R8") == 0)	threadContext->R8 = value;
+	else if (_stricmp(reg, "R9") == 0)	threadContext->R9 = value;
+	else if (_stricmp(reg, "R10") == 0)	threadContext->R10 = value;
+	else if (_stricmp(reg, "R11") == 0)	threadContext->R11 = value;
+	else if (_stricmp(reg, "R12") == 0)	threadContext->R12 = value;
+	else if (_stricmp(reg, "R13") == 0)	threadContext->R13 = value;
+	else if (_stricmp(reg, "R14") == 0)	threadContext->R14 = value;
+	else if (_stricmp(reg, "R15") == 0)	threadContext->R15 = value;
+	else return FALSE;
+
+	if (this->setThreadContext(threadID, threadContext))
+	{
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
+	}
+}
+
+BOOL Debugger::addSoftwareBreakpoint(LPVOID address, BOOL isPersistent)
+{
+	// Checks if address is already in soft breakpoint list
+	if (!this->softwareBreakpoints.count(address))
+	{
+		BYTE originalByte;
+		SIZE_T count;
+		if (ReadProcessMemory(this->hProcess, address, &originalByte, 1, &count))
+		{
+			BYTE INT3Byte = 0xCC;
+			if (WriteProcessMemory(this->hProcess, address, &INT3Byte, 1, &count))
+			{
+				SoftwareBreakpoint softwareBreakpoint;
+				softwareBreakpoint.address = address;
+				softwareBreakpoint.originalByte = originalByte;
+				softwareBreakpoint.isPersistent = isPersistent;
+
+				this->softwareBreakpoints[address] = softwareBreakpoint;
+				return TRUE;
+			}
+		}
+	}
+	return FALSE;
+}
+
+BOOL Debugger::delSoftwareBreakpoint(LPVOID address)
+{
+	SoftwareBreakpoints::iterator breakpoint = this->softwareBreakpoints.find(address);
+	if (breakpoint != this->softwareBreakpoints.end())
+	{
+		BYTE originalByte = breakpoint->second.originalByte;
+		SIZE_T count;
+		if (WriteProcessMemory(this->hProcess, address, &originalByte, 1, &count))
+		{
+			this->softwareBreakpoints.erase(breakpoint);
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+BOOL Debugger::addHardwareBreakpoint(LPVOID address)
+{
+	return 0;
+}
+
+BOOL Debugger::delHardwareBreakpoint(LPVOID address)
+{
+	return 0;
+}
+
+BOOL Debugger::addMemoryBreakpoint(LPVOID address)
+{
+	return 0;
+}
+
+BOOL Debugger::delMemoryBreakpoint(LPVOID address)
+{
+	return 0;
 }
