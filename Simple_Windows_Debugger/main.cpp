@@ -20,7 +20,7 @@ void attach()
 
 void load()
 {
-	if (debugger.loadProcess("C:\\Users\\louis\\source\\repos\\Test_C\\Release\\Test_C.exe", NULL))
+	if (debugger.loadProcess("C:\\Users\\louis\\source\\repos\\Test_C\\x64\\Release\\Test_C.exe", (LPTSTR)"toto toto tata"))
 	{
 		std::cout << "process loaded " << std::endl;
 	}
@@ -31,7 +31,7 @@ void dumpThreadRegisters()
 	THREADENTRY32* threadEntries = new THREADENTRY32[0];
 	UINT nbThreads = debugger.enumerateThreads(&threadEntries);
 
-	for (int i = 0; i < nbThreads; i++)
+	for (UINT i = 0; i < nbThreads; i++)
 	{
 		CONTEXT* thread = debugger.getThreadContext(threadEntries[i].th32ThreadID);
 		std::cout << "[*] Dumping registers for thread ID: " << threadEntries[i].th32ThreadID << std::endl << std::hex;
@@ -50,8 +50,10 @@ int main(int argc, char* argv[])
 {
 	debugger = Debugger();
 	
-	//load();
-	attach();
+	load();
+	//attach();
+	debugger.addSoftwareBreakpoint((LPVOID)0x00007FF72D661026, TRUE);
+	debugger.addSoftwareBreakpoint((LPVOID)0x00007FF72D661057, TRUE);
 	debugger.runProcess();
 
 	//dumpThreadRegisters();
@@ -62,3 +64,4 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
+ 
