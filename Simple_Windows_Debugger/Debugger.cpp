@@ -44,16 +44,16 @@ VOID Debugger::getDebugEvent()
 				//std::cout << "Exception access violation at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
 			}
 			else if (exceptionCode == EXCEPTION_BREAKPOINT)
-			{	// This exception is for soft breakpoints
+			{	// This exception is for software breakpoints
 				continueStatus = this->softwareBreakpointExceptionHandler(debugEvent.dwThreadId, exceptionAddress);
+			}
+			else if (exceptionCode == EXCEPTION_SINGLE_STEP)
+			{	// This exception is for hardware breakpoints
+				continueStatus = this->hardwareBreakpointExceptionHandler(debugEvent.dwThreadId, exceptionAddress);
 			}
 			else if (exceptionCode == EXCEPTION_GUARD_PAGE)
 			{	// This exception is for memory breakpoints
 				//std::cout << "Exception guard page at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
-			}
-			else if (exceptionCode == EXCEPTION_SINGLE_STEP)
-			{	// This exception is for hardware breakpoints
-				//std::cout << "Exception single step at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
 			}
 			else
 			{
@@ -72,7 +72,7 @@ VOID Debugger::getDebugEvent()
 #include <iostream>//
 DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
 {
-	std::cout << std::hex << " Exception breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+	std::cout << std::hex << " Exception software breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
 	if (this->softwareBreakpoints.count(exceptionAddress))
 	{
@@ -81,6 +81,12 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID except
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
 		this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress);
 	}
+	return DBG_CONTINUE;
+}
+
+DWORD Debugger::hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
+{
+	std::cout << "Exception hardware breakpoint at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
 	return DBG_CONTINUE;
 }
 
@@ -140,7 +146,7 @@ BOOL Debugger::detachProcess()
 
 UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 {
-	UINT threadNumber = 0;
+	UINT threadsNumber = 0;
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, this->processID);
 	if (snapshot)
 	{
@@ -151,11 +157,11 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 		{
 			if (threadEntry.th32OwnerProcessID == this->processID)
 			{
-				threadNumber++;
+				threadsNumber++;
 				// Dynamically add an element to the array of thread entry.
-				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadNumber];
-				memcpy_s(tempThreadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32), *threadEntryArray, (threadNumber - 1) * sizeof(THREADENTRY32));
-				tempThreadEntryArray[threadNumber - 1] = threadEntry;
+				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadsNumber];
+				memcpy_s(tempThreadEntryArray, (threadsNumber - 1) * sizeof(THREADENTRY32), *threadEntryArray, (threadsNumber - 1) * sizeof(THREADENTRY32));
+				tempThreadEntryArray[threadsNumber - 1] = threadEntry;
 				delete[] *threadEntryArray;
 				*threadEntryArray = tempThreadEntryArray;
 			}
@@ -163,7 +169,7 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 		}
 		CloseHandle(snapshot);
 	}
-	return threadNumber;
+	return threadsNumber;
 }
 
 LPCONTEXT Debugger::getThreadContext(DWORD threadID)
@@ -272,9 +278,71 @@ BOOL Debugger::delSoftwareBreakpoint(LPVOID address)
 	return FALSE;
 }
 
-BOOL Debugger::addHardwareBreakpoint(LPVOID address)
+BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition, BOOL isPersistent)
 {
-	return 0;
+	if (length == 1 || length == 2 || length == 4)
+	{
+		// length-- because the following codes are used for determining length :
+		//      00 - 1 byte length
+		//      01 - 2 byte length
+		//      10 - undefined
+		//      11 - 4 byte length
+		length--;
+
+		if (condition == HW_EXECUTE || condition == HW_WRITE || condition == HW_ACCESS)
+		{
+			// We may need to check if we already have a hardware breakpoint at an address.
+			// I don't kmow what happens when 2 hardware breakpoints target the same address.
+
+			// Checks for an available sport on DR registers
+			BYTE availableSpot;
+			if (hardwareBreakpoints.count(0))		availableSpot = 0;
+			else if (hardwareBreakpoints.count(1))	availableSpot = 1;
+			else if (hardwareBreakpoints.count(2))	availableSpot = 2;
+			else if (hardwareBreakpoints.count(3))	availableSpot = 3;
+			else
+				return FALSE;
+
+			THREADENTRY32* threadEntries = new THREADENTRY32[0];
+			INT threadsNumber = this->enumerateThreads(&threadEntries);
+			for (INT i = 0; i < threadsNumber; i++)
+			{
+				LPCONTEXT threadContext = this->getThreadContext(threadEntries[i].th32ThreadID);
+
+				// Stores the address in the available register.
+				switch (availableSpot)
+				{
+				case 0: threadContext->Dr0 = (DWORD64)address;
+					break;
+				case 1: threadContext->Dr1 = (DWORD64)address;
+					break;
+				case 2: threadContext->Dr2 = (DWORD64)address;
+					break;
+				case 3: threadContext->Dr3 = (DWORD64)address;
+					break;
+				default:
+					return FALSE;
+				}
+
+				// Enables the breakpoint by setting its type (Local/Global)
+				// in the first 8 bits (0-7) of DR7.
+				// The breakpoints are "Local" in our case.
+				threadContext->Dr7 |= 1 << (availableSpot * 2);
+
+				// Sets the condition of the breakpoint in the last 16 bits of DR7 (groups of 2 bits every 4 bits).
+				threadContext->Dr7 |= condition << ((availableSpot * 4) + 16);
+
+				// Sets the length of the breakpoint in the last 18 bits of DR7 (groups of 2 bits every 4 bits).
+				threadContext->Dr7 |= length << ((availableSpot * 4) + 18);
+
+				this->setThreadContext(threadEntries[i].th32ThreadID, threadContext);
+			}
+				// Adds the hardware breakpoint to the list.
+				HardwareBreakpoint hardwareBreakpoint = {address, length, condition, isPersistent};
+				hardwareBreakpoints[availableSpot] = hardwareBreakpoint;
+		}
+	}
+	return FALSE;
 }
 
 BOOL Debugger::delHardwareBreakpoint(LPVOID address)
