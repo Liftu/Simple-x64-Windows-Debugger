@@ -87,27 +87,8 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID except
 DWORD Debugger::hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
 {
 	std::cout << std::hex << "Exception hardware breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
-	//this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress + 1);
-	LPCONTEXT threadContext = this->getThreadContext(threadID);
-	BYTE slot;
-	// Not quite sure what DR6 does.
-	// Will have to study this.
-	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0))
-		slot = 0;
-	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(1))
-		slot = 1;
-	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(2))
-		slot = 2;
-	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(3))
-		slot = 3;
-	else // not a hardware breakpoint
-	{ 
 
-	}
-
-	// Removes the hardware breakpoint
-	this->delHardwareBreakpoint(slot);
-
+	this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress + 1);
 	return DBG_CONTINUE;
 }
 
@@ -366,7 +347,7 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 	return FALSE;
 }
 
-BOOL Debugger::delHardwareBreakpoint(BYTE slot)
+BOOL Debugger::delHardwareBreakpoint(LPVOID address)
 {
 	return 0;
 }

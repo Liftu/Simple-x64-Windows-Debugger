@@ -32,7 +32,7 @@ public:
 	BOOL addSoftwareBreakpoint(LPVOID address, BOOL isPersistent);
 	BOOL delSoftwareBreakpoint(LPVOID address);
 	BOOL addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition, BOOL isPersistent);
-	BOOL delHardwareBreakpoint(BYTE slot);
+	BOOL delHardwareBreakpoint(LPVOID address);
 	BOOL addMemoryBreakpoint(LPVOID address);
 	BOOL delMemoryBreakpoint(LPVOID address);
 
