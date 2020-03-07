@@ -92,7 +92,7 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID except
 	BYTE slot;
 	// Not quite sure what DR6 does.
 	// Will have to study this.
-	if		((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
+	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
 	else if ((threadContext->Dr6 & 0x2) && this->hardwareBreakpoints.count(1)) slot = 1;
 	else if ((threadContext->Dr6 & 0x4) && this->hardwareBreakpoints.count(2)) slot = 2;
 	else if ((threadContext->Dr6 & 0x8) && this->hardwareBreakpoints.count(3)) slot = 3;
@@ -313,7 +313,7 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 
 			// Checks for an available sport on DR registers
 			BYTE availableSlot;
-			if		(!hardwareBreakpoints.count(0))	availableSlot = 0;
+			if (!hardwareBreakpoints.count(0)) availableSlot = 0;
 			else if (!hardwareBreakpoints.count(1))	availableSlot = 1;
 			else if (!hardwareBreakpoints.count(2))	availableSlot = 2;
 			else if (!hardwareBreakpoints.count(3))	availableSlot = 3;
