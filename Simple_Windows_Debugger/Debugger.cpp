@@ -296,10 +296,10 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 
 			// Checks for an available sport on DR registers
 			BYTE availableSpot;
-			if (hardwareBreakpoints.count(0))		availableSpot = 0;
-			else if (hardwareBreakpoints.count(1))	availableSpot = 1;
-			else if (hardwareBreakpoints.count(2))	availableSpot = 2;
-			else if (hardwareBreakpoints.count(3))	availableSpot = 3;
+			if (!hardwareBreakpoints.count(0))		availableSpot = 0;
+			else if (!hardwareBreakpoints.count(1))	availableSpot = 1;
+			else if (!hardwareBreakpoints.count(2))	availableSpot = 2;
+			else if (!hardwareBreakpoints.count(3))	availableSpot = 3;
 			else
 				return FALSE;
 
