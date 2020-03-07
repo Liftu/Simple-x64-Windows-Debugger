@@ -5,6 +5,10 @@ Debugger::Debugger()
 	this->isDebuggerActive = FALSE;
 	this->processID = NULL;
 	this->hProcess = NULL;
+	// Get the default memory page size.
+	SYSTEM_INFO systemInfo;
+	GetSystemInfo(&systemInfo);
+	this->pageSize = systemInfo.dwPageSize;
 }
 
 Debugger::~Debugger()
@@ -37,7 +41,6 @@ VOID Debugger::getDebugEvent()
 		if (debugEvent.dwDebugEventCode == EXCEPTION_DEBUG_EVENT)
 		{
 			DWORD exceptionCode = debugEvent.u.Exception.ExceptionRecord.ExceptionCode;
-			PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
 
 			if (exceptionCode == EXCEPTION_ACCESS_VIOLATION)
 			{
@@ -45,15 +48,15 @@ VOID Debugger::getDebugEvent()
 			}
 			else if (exceptionCode == EXCEPTION_BREAKPOINT)
 			{	// This exception is for software breakpoints
-				continueStatus = this->softwareBreakpointExceptionHandler(debugEvent.dwThreadId, exceptionAddress);
+				continueStatus = this->softwareBreakpointExceptionHandler(debugEvent);
 			}
 			else if (exceptionCode == EXCEPTION_SINGLE_STEP)
 			{	// This exception is for hardware breakpoints
-				continueStatus = this->hardwareBreakpointExceptionHandler(debugEvent.dwThreadId, exceptionAddress);
+				continueStatus = this->hardwareBreakpointExceptionHandler(debugEvent);
 			}
 			else if (exceptionCode == EXCEPTION_GUARD_PAGE)
 			{	// This exception is for memory breakpoints
-				//std::cout << "Exception guard page at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+				continueStatus = this->memoryBreakpointExceptionHandler(debugEvent);
 			}
 			else
 			{
@@ -70,8 +73,9 @@ VOID Debugger::getDebugEvent()
 }
 
 #include <iostream>//
-DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
+DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 {
+	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
 	std::cout << std::hex << "Exception software breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
 	if (this->softwareBreakpoints.count(exceptionAddress))
@@ -79,19 +83,20 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DWORD threadID, LPVOID except
 		// We restore the changed byte and delete the breakpoint.
 		this->delSoftwareBreakpoint(exceptionAddress);
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
-		this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress);
+		this->setRegister(debugEvent.dwThreadId, "RIP", (DWORD64)exceptionAddress);
 	}
 	return DBG_CONTINUE;
 }
 
-DWORD Debugger::hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress)
+DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 {
+	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
 	std::cout << std::hex << "Exception hardware breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
-	//this->setRegister(threadID, "RIP", (DWORD64)exceptionAddress + 1);
-	LPCONTEXT threadContext = this->getThreadContext(threadID);
+
+	LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
+	
 	BYTE slot;
-	// Not quite sure what DR6 does.
-	// Will have to study this.
+	// DR6 set one of its 4 first bits corresponding to the breakpoint has been hit (DR0-DR3)
 	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
 	else if ((threadContext->Dr6 & 0x2) && this->hardwareBreakpoints.count(1)) slot = 1;
 	else if ((threadContext->Dr6 & 0x4) && this->hardwareBreakpoints.count(2)) slot = 2;
@@ -103,6 +108,14 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID except
 
 	// Removes the hardware breakpoint
 	this->delHardwareBreakpoint(slot);
+
+	return DBG_CONTINUE;
+}
+
+DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
+{
+	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
+	std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
 	return DBG_CONTINUE;
 }
@@ -267,10 +280,6 @@ BOOL Debugger::addSoftwareBreakpoint(LPVOID address, BOOL isPersistent)
 			if (WriteProcessMemory(this->hProcess, address, &INT3Byte, 1, &count))
 			{
 				SoftwareBreakpoint softwareBreakpoint = { address, originalByte, isPersistent };
-				//softwareBreakpoint.address = address;
-				//softwareBreakpoint.originalByte = originalByte;
-				//softwareBreakpoint.isPersistent = isPersistent;
-
 				this->softwareBreakpoints[address] = softwareBreakpoint;
 				return TRUE;
 			}
@@ -349,9 +358,8 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 				this->setThreadContext(threadEntries[i].th32ThreadID, threadContext);
 			}
 			// Adds the hardware breakpoint to the list.
-			HardwareBreakpoint hardwareBreakpoint = {address, length, condition, isPersistent};
+			HardwareBreakpoint hardwareBreakpoint = { address, length, condition, isPersistent };
 			hardwareBreakpoints[availableSlot] = hardwareBreakpoint;
-			
 			return TRUE;
 		}
 	}
@@ -386,13 +394,30 @@ BOOL Debugger::delHardwareBreakpoint(BYTE slot)
 		this->setThreadContext(threadEntries[i].th32ThreadID, threadContext);
 	}
 	this->hardwareBreakpoints.erase(slot);
-	
 	return TRUE;
 }
 
-BOOL Debugger::addMemoryBreakpoint(LPVOID address)
+BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, BOOL isPersistent)
 {
-	return 0;
+	MEMORY_BASIC_INFORMATION memoryBasicInfo;
+	// Gets the memory page infos and checks if it got all the infos
+	if (VirtualQueryEx(this->hProcess, address, &memoryBasicInfo, sizeof(memoryBasicInfo)) >= sizeof(memoryBasicInfo))
+	{
+		// Get the base address of the current memory page;
+		LPVOID currentPage = memoryBasicInfo.BaseAddress;
+		// Loop on every pages within the range of the memory breakpoint
+		while ((DWORD64)currentPage <= ((DWORD64)address + size))
+		{
+			DWORD oldProtect;
+			// Sets the guard page protection on the memory page;
+			if (!VirtualProtectEx(this->hProcess, memoryBasicInfo.BaseAddress, size, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
+				return FALSE;
+			// Next page
+			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
+		}
+		MemoryBreakpoint memorybreakpoint = { address, size, condition, memoryBasicInfo, isPersistent };
+	}
+	return FALSE;
 }
 
 BOOL Debugger::delMemoryBreakpoint(LPVOID address)

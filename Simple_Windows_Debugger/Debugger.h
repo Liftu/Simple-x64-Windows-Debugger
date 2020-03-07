@@ -33,18 +33,20 @@ public:
 	BOOL delSoftwareBreakpoint(LPVOID address);
 	BOOL addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition, BOOL isPersistent);
 	BOOL delHardwareBreakpoint(BYTE slot);
-	BOOL addMemoryBreakpoint(LPVOID address);
+	BOOL addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, BOOL isPersistent);
 	BOOL delMemoryBreakpoint(LPVOID address);
 
 private:
 	VOID getDebugEvent();
 
-	DWORD softwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress);
-	DWORD hardwareBreakpointExceptionHandler(DWORD threadID, LPVOID exceptionAddress);
+	DWORD softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
+	DWORD hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
+	DWORD memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
 
 	BOOL isDebuggerActive;
 	UINT processID;
 	HANDLE hProcess;
+	DWORD pageSize;
 
 	// Software breakpoints //
 	struct SoftwareBreakpoint
@@ -72,7 +74,10 @@ private:
 	struct MemoryBreakpoint
 	{
 		LPVOID address;
-
+		DWORD size;
+		BYTE condition;
+		MEMORY_BASIC_INFORMATION memoryBasicInfo;
+		BOOL isPersistent;
 	};
 	typedef std::map<LPVOID, MemoryBreakpoint> MemoryBreakpoints;
 	MemoryBreakpoints memoryBreakpoints;

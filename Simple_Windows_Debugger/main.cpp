@@ -52,8 +52,8 @@ int main(int argc, char* argv[])
 	
 	load();
 	//attach();
+	debugger.addMemoryBreakpoint((LPVOID)0x00007FF7B8BA2200, 1, 0, TRUE);
 	debugger.addHardwareBreakpoint((LPVOID)0x00007FF7B8BA1027, 1, HW_EXECUTE, TRUE);
-	debugger.addHardwareBreakpoint((LPVOID)0x00007FF7B8BA1026, 1, HW_EXECUTE, TRUE);
 	debugger.addSoftwareBreakpoint((LPVOID)0x00007FF72D661057, TRUE);
 	debugger.runProcess();
 
