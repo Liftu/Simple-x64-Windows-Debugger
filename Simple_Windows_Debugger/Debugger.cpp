@@ -117,6 +117,8 @@ DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
 	std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
+	//this->delMemoryBreakpoint()
+
 	return DBG_CONTINUE;
 }
 
@@ -410,17 +412,33 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, B
 		{
 			DWORD oldProtect;
 			// Sets the guard page protection on the memory page;
-			if (!VirtualProtectEx(this->hProcess, memoryBasicInfo.BaseAddress, size, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
+			if (!VirtualProtectEx(this->hProcess, currentPage, size, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
 				return FALSE;
-			// Next page
-			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
+			// Next page (sorry, I didn't find a nicer way to do it)
+			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
 		}
 		MemoryBreakpoint memorybreakpoint = { address, size, condition, memoryBasicInfo, isPersistent };
+		memoryBreakpoints[address] = memorybreakpoint;
+		return TRUE;
 	}
 	return FALSE;
 }
 
 BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 {
-	return 0;
+	MemoryBreakpoints::iterator breakpoint = memoryBreakpoints.find(address);
+	if (breakpoint != memoryBreakpoints.end())
+	{
+		LPVOID currentPage = breakpoint->second.memoryBasicInfo.BaseAddress;
+		while ((DWORD64)currentPage <= ((DWORD64)breakpoint->second.address + breakpoint->second.size))
+		{
+			DWORD oldProtect;
+			if (!VirtualProtectEx(this->hProcess, currentPage, breakpoint->second.size, breakpoint->second.memoryBasicInfo.Protect, &oldProtect))
+				return FALSE;
+			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
+		}
+		memoryBreakpoints.erase(breakpoint);
+		return TRUE;
+	}
+	return FALSE;
 }
