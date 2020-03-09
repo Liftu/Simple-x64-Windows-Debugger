@@ -5,6 +5,7 @@ Debugger::Debugger()
 	this->isDebuggerActive = FALSE;
 	this->processID = NULL;
 	this->hProcess = NULL;
+	this->firstBreakpointOccured = FALSE;
 	// Get the default memory page size.
 	SYSTEM_INFO systemInfo;
 	GetSystemInfo(&systemInfo);
@@ -59,8 +60,9 @@ VOID Debugger::getDebugEvent()
 				continueStatus = this->memoryBreakpointExceptionHandler(debugEvent);
 			}
 			else
-			{
+			{	// Unhandled exceptions
 				//std::cout << "Exception not handled at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+				continueStatus = DBG_EXCEPTION_NOT_HANDLED;
 			}
 		}
 		else if (debugEvent.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
@@ -68,7 +70,7 @@ VOID Debugger::getDebugEvent()
 			this->isDebuggerActive = FALSE;
 		}
 
-		ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, DBG_CONTINUE);
+		ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
 	}
 }
 
@@ -84,6 +86,14 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 		this->delSoftwareBreakpoint(exceptionAddress);
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
 		this->setRegister(debugEvent.dwThreadId, "RIP", (DWORD64)exceptionAddress);
+	}
+	else
+	{
+		if (!this->firstBreakpointOccured)
+		{
+			// I would like to give control to user so he can puts breakpoints after the process has started.
+			this->firstBreakpointOccured = TRUE;
+		}
 	}
 	return DBG_CONTINUE;
 }
@@ -114,11 +124,46 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 
 DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 {
-	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
-	std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+	LPVOID exceptionAddress = (LPVOID)debugEvent.u.Exception.ExceptionRecord.ExceptionInformation[1];
+	MemoryBreakpoints::iterator breakpoint = this->memoryBreakpoints.find(exceptionAddress);
+	if (breakpoint != this->memoryBreakpoints.end())
+	{
+		// If the exception is triggered by our memory breakpoint
+		std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
-	//this->delMemoryBreakpoint()
+		if (breakpoint->second.isPersistent)
+		{
+			//MEMORY_BASIC_INFORMATION memoryBasicInfo;
+			//if (VirtualQueryEx(this->hProcess, exceptionAddress, &memoryBasicInfo, sizeof(memoryBasicInfo)) >= sizeof(memoryBasicInfo))
+			//{
+			//	LPVOID exceptionAddressPage = memoryBasicInfo.BaseAddress;
+			//	DWORD oldProtect;
+			//	VirtualProtectEx(this->hProcess, exceptionAddressPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect);
+			//}
+			//return DBG_CONTINUE;
+		}
+		else
+		{
+			this->delMemoryBreakpoint(exceptionAddress);
+		}
 
+		return DBG_CONTINUE;
+	}
+	else
+	{
+		// If the exception occurs in the page guard of our breakpoint but is not our breakpoint then restore the page guard.
+		// Running this code before process has really started seems to cause an infinite loop
+		// I'm trying to figure out how to break to the first windows driven breakpoint and then give control to the user.
+
+		//MEMORY_BASIC_INFORMATION memoryBasicInfo;
+		//if (VirtualQueryEx(this->hProcess, exceptionAddress, &memoryBasicInfo, sizeof(memoryBasicInfo)) >= sizeof(memoryBasicInfo))
+		//{
+		//	LPVOID exceptionAddressPage = memoryBasicInfo.BaseAddress;
+		//	DWORD oldProtect;
+		//	VirtualProtectEx(this->hProcess, exceptionAddressPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect);
+		//}
+		//return DBG_CONTINUE;
+	}
 	return DBG_CONTINUE;
 }
 
@@ -412,7 +457,7 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, B
 		{
 			DWORD oldProtect;
 			// Sets the guard page protection on the memory page;
-			if (!VirtualProtectEx(this->hProcess, currentPage, size, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
+			if (!VirtualProtectEx(this->hProcess, currentPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
 				return FALSE;
 			// Next page (sorry, I didn't find a nicer way to do it)
 			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
@@ -433,7 +478,9 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 		while ((DWORD64)currentPage <= ((DWORD64)breakpoint->second.address + breakpoint->second.size))
 		{
 			DWORD oldProtect;
-			if (!VirtualProtectEx(this->hProcess, currentPage, breakpoint->second.size, breakpoint->second.memoryBasicInfo.Protect, &oldProtect))
+			// /!\ TODO:
+			// I should check if the memory page isn't the the range of another memory breakpoint before removing the guard page on it.
+			if (!VirtualProtectEx(this->hProcess, currentPage, 1, breakpoint->second.memoryBasicInfo.Protect, &oldProtect))
 				return FALSE;
 			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
 		}

@@ -46,6 +46,7 @@ private:
 	BOOL isDebuggerActive;
 	UINT processID;
 	HANDLE hProcess;
+	BOOL firstBreakpointOccured;
 	DWORD pageSize;
 
 	// Software breakpoints //
