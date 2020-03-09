@@ -125,11 +125,13 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 {
 	LPVOID exceptionAddress = (LPVOID)debugEvent.u.Exception.ExceptionRecord.ExceptionInformation[1];
+	std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+
 	MemoryBreakpoints::iterator breakpoint = this->memoryBreakpoints.find(exceptionAddress);
 	if (breakpoint != this->memoryBreakpoints.end())
 	{
 		// If the exception is triggered by our memory breakpoint
-		std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+		//std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
 		if (breakpoint->second.isPersistent)
 		{
@@ -444,8 +446,9 @@ BOOL Debugger::delHardwareBreakpoint(BYTE slot)
 	return TRUE;
 }
 
-BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, BOOL isPersistent)
+BOOL Debugger::addMemoryBreakpoint(LPVOID address, /*DWORD size, */BYTE condition, BOOL isPersistent)
 {
+	// The size functionnality is disabled for the moment.
 	MEMORY_BASIC_INFORMATION memoryBasicInfo;
 	// Gets the memory page infos and checks if it got all the infos
 	if (VirtualQueryEx(this->hProcess, address, &memoryBasicInfo, sizeof(memoryBasicInfo)) >= sizeof(memoryBasicInfo))
@@ -453,7 +456,7 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, B
 		// Get the base address of the current memory page;
 		LPVOID currentPage = memoryBasicInfo.BaseAddress;
 		// Loop on every pages within the range of the memory breakpoint
-		while ((DWORD64)currentPage <= ((DWORD64)address + size))
+		while ((DWORD64)currentPage <= ((DWORD64)address))// + size))
 		{
 			DWORD oldProtect;
 			// Sets the guard page protection on the memory page;
@@ -462,7 +465,7 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, DWORD size, BYTE condition, B
 			// Next page (sorry, I didn't find a nicer way to do it)
 			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
 		}
-		MemoryBreakpoint memorybreakpoint = { address, size, condition, memoryBasicInfo, isPersistent };
+		MemoryBreakpoint memorybreakpoint = { address, /*size, */condition, memoryBasicInfo, isPersistent };
 		memoryBreakpoints[address] = memorybreakpoint;
 		return TRUE;
 	}
@@ -475,13 +478,36 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 	if (breakpoint != memoryBreakpoints.end())
 	{
 		LPVOID currentPage = breakpoint->second.memoryBasicInfo.BaseAddress;
-		while ((DWORD64)currentPage <= ((DWORD64)breakpoint->second.address + breakpoint->second.size))
+		while ((DWORD64)currentPage <= ((DWORD64)breakpoint->second.address))// + breakpoint->second.size))
 		{
-			DWORD oldProtect;
-			// /!\ TODO:
-			// I should check if the memory page isn't the the range of another memory breakpoint before removing the guard page on it.
-			if (!VirtualProtectEx(this->hProcess, currentPage, 1, breakpoint->second.memoryBasicInfo.Protect, &oldProtect))
-				return FALSE;
+			// Checks if the memory page isn't in the range of another memory breakpoint before removing the guard page on it.
+			BOOL pageAlreadyUsed = FALSE;
+			for (MemoryBreakpoints::iterator breakpoints = this->memoryBreakpoints.begin(); 
+					breakpoints != this->memoryBreakpoints.end() && !pageAlreadyUsed; breakpoints++)
+			{
+				if (breakpoints != breakpoint)
+				{
+					LPVOID memoryPage = breakpoints->second.memoryBasicInfo.BaseAddress;
+					while ((DWORD64)memoryPage <= ((DWORD64)breakpoints->second.address))// + breakpoints->second.size))
+					{
+						if (memoryPage == currentPage)
+						{
+							pageAlreadyUsed = TRUE;
+							break;
+						}
+						memoryPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
+					}
+				}
+			}
+
+			// If this memory page has no other breakpoints using it : remove the guard page.
+			if (!pageAlreadyUsed)
+			{
+				DWORD oldProtect;
+				if (!VirtualProtectEx(this->hProcess, currentPage, 1, breakpoint->second.memoryBasicInfo.Protect, &oldProtect))
+					return FALSE;
+			}
+
 			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
 		}
 		memoryBreakpoints.erase(breakpoint);
