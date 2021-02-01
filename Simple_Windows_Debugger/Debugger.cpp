@@ -1,4 +1,5 @@
 #include "Debugger.h"
+#include <iostream>
 
 Debugger::Debugger()
 {
@@ -18,6 +19,8 @@ Debugger::~Debugger()
 	{
 		this->detachProcess();
 	}
+
+	CloseHandle(this->hProcess);
 }
 
 VOID Debugger::runProcess()
@@ -74,7 +77,6 @@ VOID Debugger::getDebugEvent()
 	}
 }
 
-#include <iostream>//
 DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 {
 	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
@@ -104,7 +106,7 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 	std::cout << std::hex << "Exception hardware breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
 	LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
-	
+
 	BYTE slot;
 	// DR6 set one of its 4 first bits corresponding to the breakpoint has been hit (DR0-DR3)
 	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
@@ -112,7 +114,7 @@ DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 	else if ((threadContext->Dr6 & 0x4) && this->hardwareBreakpoints.count(2)) slot = 2;
 	else if ((threadContext->Dr6 & 0x8) && this->hardwareBreakpoints.count(3)) slot = 3;
 	else // not a hardware breakpoint
-	{ 
+	{
 		return DBG_COMMAND_EXCEPTION;
 	}
 
@@ -181,33 +183,44 @@ BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
 
 	PROCESS_INFORMATION processInformation;
 
-	if (CreateProcess(executablePath, arguments, NULL, NULL, NULL, DEBUG_PROCESS, NULL, NULL, &startupInfo, &processInformation))
+	BOOL bCreateProc = CreateProcess(executablePath, arguments, NULL, NULL, NULL, DEBUG_PROCESS, NULL, NULL, &startupInfo, &processInformation);
+
+	if (bCreateProc)
 	{
 		this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processInformation.dwProcessId);
 		this->isDebuggerActive = true;
 		this->processID = processInformation.dwProcessId;
-		return TRUE;
 	}
-	else
-	{
-		return FALSE;
-	}
+
+	// release handles
+	CloseHandle(processInformation.hProcess);
+	CloseHandle(processInformation.hThread);
+
+	return bCreateProc;
 }
 
 BOOL Debugger::attachProcess(DWORD pid)
 {
 	this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-	
-	if (DebugActiveProcess(pid))
-	{
-		this->isDebuggerActive = TRUE;
-		this->processID = pid;
-		return TRUE;
-	}
-	else
+
+	if (this->hProcess == INVALID_HANDLE_VALUE)
 	{
 		return FALSE;
 	}
+
+	BOOL bResult = DebugActiveProcess(pid);
+
+	if (bResult)
+	{
+		this->isDebuggerActive = TRUE;
+		this->processID = pid;
+	}
+	else
+	{
+		CloseHandle(this->hProcess);
+	}
+
+	return bResult;
 }
 
 BOOL Debugger::detachProcess()
@@ -227,7 +240,8 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 {
 	UINT threadsNumber = 0;
 	HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, this->processID);
-	if (snapshot)
+
+	if (snapshot != INVALID_HANDLE_VALUE)
 	{
 		THREADENTRY32 threadEntry;
 		threadEntry.dwSize = sizeof(threadEntry);
@@ -241,13 +255,15 @@ UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
 				THREADENTRY32* tempThreadEntryArray = new THREADENTRY32[threadsNumber];
 				memcpy_s(tempThreadEntryArray, (threadsNumber - 1) * sizeof(THREADENTRY32), *threadEntryArray, (threadsNumber - 1) * sizeof(THREADENTRY32));
 				tempThreadEntryArray[threadsNumber - 1] = threadEntry;
-				delete[] *threadEntryArray;
+				delete[] * threadEntryArray;
 				*threadEntryArray = tempThreadEntryArray;
 			}
 			success = Thread32Next(snapshot, &threadEntry);
 		}
+
 		CloseHandle(snapshot);
 	}
+
 	return threadsNumber;
 }
 
@@ -255,32 +271,42 @@ LPCONTEXT Debugger::getThreadContext(DWORD threadID)
 {
 	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
 
+	if (hThread == INVALID_HANDLE_VALUE)
+	{
+		return nullptr;
+	}
+
+	BOOL bSuccess;
 	CONTEXT threadContext;
+
 	threadContext.ContextFlags = CONTEXT_FULL | CONTEXT_DEBUG_REGISTERS;
 
-	if (GetThreadContext(hThread, &threadContext))
+	bSuccess = GetThreadContext(hThread, &threadContext);
+	CloseHandle(hThread);
+
+	if (bSuccess)
 	{
-		CloseHandle(hThread);
 		return &threadContext;
 	}
 	else
 	{
-		return NULL;
+		return nullptr;
 	}
 }
 
 BOOL Debugger::setThreadContext(DWORD threadID, LPCONTEXT threadContext)
 {
 	HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, threadID);
-	
-	if (SetThreadContext(hThread, threadContext))
-	{
-		return TRUE;
-	}
-	else
+
+	if (hThread == INVALID_HANDLE_VALUE)
 	{
 		return FALSE;
 	}
+
+	BOOL bSuccess = SetThreadContext(hThread, threadContext);
+	CloseHandle(hThread);
+
+	return bSuccess;
 }
 
 BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, DWORD64 value)
@@ -391,7 +417,7 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 				case 1: threadContext->Dr1 = (DWORD64)address; break;
 				case 2: threadContext->Dr2 = (DWORD64)address; break;
 				case 3: threadContext->Dr3 = (DWORD64)address; break;
-				default: 
+				default:
 					return FALSE;
 				}
 
@@ -463,7 +489,7 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, /*DWORD size, */BYTE conditio
 			if (!VirtualProtectEx(this->hProcess, currentPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
 				return FALSE;
 			// Next page (sorry, I didn't find a nicer way to do it)
-			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
+			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
 		}
 		MemoryBreakpoint memorybreakpoint = { address, /*size, */condition, memoryBasicInfo, isPersistent };
 		memoryBreakpoints[address] = memorybreakpoint;
@@ -482,8 +508,8 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 		{
 			// Checks if the memory page isn't in the range of another memory breakpoint before removing the guard page on it.
 			BOOL pageAlreadyUsed = FALSE;
-			for (MemoryBreakpoints::iterator breakpoints = this->memoryBreakpoints.begin(); 
-					breakpoints != this->memoryBreakpoints.end() && !pageAlreadyUsed; breakpoints++)
+			for (MemoryBreakpoints::iterator breakpoints = this->memoryBreakpoints.begin();
+				breakpoints != this->memoryBreakpoints.end() && !pageAlreadyUsed; breakpoints++)
 			{
 				if (breakpoints != breakpoint)
 				{
@@ -495,7 +521,7 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 							pageAlreadyUsed = TRUE;
 							break;
 						}
-						memoryPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
+						memoryPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
 					}
 				}
 			}
@@ -508,7 +534,7 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 					return FALSE;
 			}
 
-			currentPage = (LPVOID) ((DWORD64)currentPage + this->pageSize);
+			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
 		}
 		memoryBreakpoints.erase(breakpoint);
 		return TRUE;
