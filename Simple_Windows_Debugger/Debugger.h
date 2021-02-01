@@ -9,6 +9,11 @@
 #define HW_WRITE 0x1
 #define HW_ACCESS 0x3
 
+#ifdef _WIN64
+#define _DWORD DWORD64
+#else
+#define _DWORD DWORD
+#endif
 
 class Debugger
 {
@@ -26,7 +31,7 @@ public:
 	UINT enumerateThreads(THREADENTRY32* threadEntryArray[]);
 	LPCONTEXT getThreadContext(DWORD threadID);
 	BOOL setThreadContext(DWORD threadID, LPCONTEXT threadContext);
-	BOOL setRegister(DWORD threadID, LPCTSTR reg, DWORD64 value);
+	BOOL setRegister(DWORD threadID, LPCTSTR reg, _DWORD value);
 
 	// Breakpoints //
 	BOOL addSoftwareBreakpoint(LPVOID address, BOOL isPersistent);

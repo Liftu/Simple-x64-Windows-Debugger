@@ -87,7 +87,7 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 		// We restore the changed byte and delete the breakpoint.
 		this->delSoftwareBreakpoint(exceptionAddress);
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
-		this->setRegister(debugEvent.dwThreadId, "RIP", (DWORD64)exceptionAddress);
+		this->setRegister(debugEvent.dwThreadId, "RIP", (_DWORD)exceptionAddress);
 	}
 	else
 	{
@@ -309,10 +309,11 @@ BOOL Debugger::setThreadContext(DWORD threadID, LPCONTEXT threadContext)
 	return bSuccess;
 }
 
-BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, DWORD64 value)
+BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, _DWORD value)
 {
 	LPCONTEXT threadContext = this->getThreadContext(threadID);
 
+#ifdef _WIN64
 	if (_stricmp(reg, "RAX") == 0)		threadContext->Rax = value;
 	else if (_stricmp(reg, "RBX") == 0)	threadContext->Rbx = value;
 	else if (_stricmp(reg, "RCX") == 0)	threadContext->Rcx = value;
@@ -331,6 +332,26 @@ BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, DWORD64 value)
 	else if (_stricmp(reg, "R14") == 0)	threadContext->R14 = value;
 	else if (_stricmp(reg, "R15") == 0)	threadContext->R15 = value;
 	else return FALSE;
+#else
+	if (_stricmp(reg, "RAX") == 0)		threadContext->Eax = value;
+	else if (_stricmp(reg, "RBX") == 0)	threadContext->Ebx = value;
+	else if (_stricmp(reg, "RCX") == 0)	threadContext->Ecx = value;
+	else if (_stricmp(reg, "RDX") == 0)	threadContext->Edx = value;
+	else if (_stricmp(reg, "RSI") == 0)	threadContext->Esi = value;
+	else if (_stricmp(reg, "RDI") == 0)	threadContext->Edi = value;
+	else if (_stricmp(reg, "RSP") == 0)	threadContext->Esp = value;
+	else if (_stricmp(reg, "RBP") == 0)	threadContext->Ebp = value;
+	else if (_stricmp(reg, "RIP") == 0)	threadContext->Eip = value;
+	//else if (_stricmp(reg, "R8") == 0)	threadContext->R8 = value;
+	//else if (_stricmp(reg, "R9") == 0)	threadContext->R9 = value;
+	//else if (_stricmp(reg, "R10") == 0)	threadContext->R10 = value;
+	//else if (_stricmp(reg, "R11") == 0)	threadContext->R11 = value;
+	//else if (_stricmp(reg, "R12") == 0)	threadContext->R12 = value;
+	//else if (_stricmp(reg, "R13") == 0)	threadContext->R13 = value;
+	//else if (_stricmp(reg, "R14") == 0)	threadContext->R14 = value;
+	//else if (_stricmp(reg, "R15") == 0)	threadContext->R15 = value;
+	else return FALSE;
+#endif
 
 	if (this->setThreadContext(threadID, threadContext))
 	{
@@ -413,10 +434,10 @@ BOOL Debugger::addHardwareBreakpoint(LPVOID address, BYTE length, BYTE condition
 				// Stores the address in the available register.
 				switch (availableSlot)
 				{
-				case 0: threadContext->Dr0 = (DWORD64)address; break;
-				case 1: threadContext->Dr1 = (DWORD64)address; break;
-				case 2: threadContext->Dr2 = (DWORD64)address; break;
-				case 3: threadContext->Dr3 = (DWORD64)address; break;
+				case 0: threadContext->Dr0 = (_DWORD)address; break;
+				case 1: threadContext->Dr1 = (_DWORD)address; break;
+				case 2: threadContext->Dr2 = (_DWORD)address; break;
+				case 3: threadContext->Dr3 = (_DWORD)address; break;
 				default:
 					return FALSE;
 				}
@@ -482,14 +503,14 @@ BOOL Debugger::addMemoryBreakpoint(LPVOID address, /*DWORD size, */BYTE conditio
 		// Get the base address of the current memory page;
 		LPVOID currentPage = memoryBasicInfo.BaseAddress;
 		// Loop on every pages within the range of the memory breakpoint
-		while ((DWORD64)currentPage <= ((DWORD64)address))// + size))
+		while ((_DWORD)currentPage <= ((_DWORD)address))// + size))
 		{
 			DWORD oldProtect;
 			// Sets the guard page protection on the memory page;
 			if (!VirtualProtectEx(this->hProcess, currentPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect))
 				return FALSE;
 			// Next page (sorry, I didn't find a nicer way to do it)
-			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
+			currentPage = (LPVOID)((_DWORD)currentPage + this->pageSize);
 		}
 		MemoryBreakpoint memorybreakpoint = { address, /*size, */condition, memoryBasicInfo, isPersistent };
 		memoryBreakpoints[address] = memorybreakpoint;
@@ -504,7 +525,7 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 	if (breakpoint != memoryBreakpoints.end())
 	{
 		LPVOID currentPage = breakpoint->second.memoryBasicInfo.BaseAddress;
-		while ((DWORD64)currentPage <= ((DWORD64)breakpoint->second.address))// + breakpoint->second.size))
+		while ((_DWORD)currentPage <= ((_DWORD)breakpoint->second.address))// + breakpoint->second.size))
 		{
 			// Checks if the memory page isn't in the range of another memory breakpoint before removing the guard page on it.
 			BOOL pageAlreadyUsed = FALSE;
@@ -514,14 +535,14 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 				if (breakpoints != breakpoint)
 				{
 					LPVOID memoryPage = breakpoints->second.memoryBasicInfo.BaseAddress;
-					while ((DWORD64)memoryPage <= ((DWORD64)breakpoints->second.address))// + breakpoints->second.size))
+					while ((_DWORD)memoryPage <= ((_DWORD)breakpoints->second.address))// + breakpoints->second.size))
 					{
 						if (memoryPage == currentPage)
 						{
 							pageAlreadyUsed = TRUE;
 							break;
 						}
-						memoryPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
+						memoryPage = (LPVOID)((_DWORD)currentPage + this->pageSize);
 					}
 				}
 			}
@@ -534,7 +555,7 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 					return FALSE;
 			}
 
-			currentPage = (LPVOID)((DWORD64)currentPage + this->pageSize);
+			currentPage = (LPVOID)((_DWORD)currentPage + this->pageSize);
 		}
 		memoryBreakpoints.erase(breakpoint);
 		return TRUE;
