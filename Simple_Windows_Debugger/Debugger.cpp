@@ -87,7 +87,11 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 		// We restore the changed byte and delete the breakpoint.
 		this->delSoftwareBreakpoint(exceptionAddress);
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
+#ifdef _WIN64
 		this->setRegister(debugEvent.dwThreadId, "RIP", (_DWORD)exceptionAddress);
+#else
+		this->setRegister(debugEvent.dwThreadId, "EIP", (_DWORD)exceptionAddress);
+#endif
 	}
 	else
 	{
@@ -333,15 +337,15 @@ BOOL Debugger::setRegister(DWORD threadID, LPCTSTR reg, _DWORD value)
 	else if (_stricmp(reg, "R15") == 0)	threadContext->R15 = value;
 	else return FALSE;
 #else
-	if (_stricmp(reg, "RAX") == 0)		threadContext->Eax = value;
-	else if (_stricmp(reg, "RBX") == 0)	threadContext->Ebx = value;
-	else if (_stricmp(reg, "RCX") == 0)	threadContext->Ecx = value;
-	else if (_stricmp(reg, "RDX") == 0)	threadContext->Edx = value;
-	else if (_stricmp(reg, "RSI") == 0)	threadContext->Esi = value;
-	else if (_stricmp(reg, "RDI") == 0)	threadContext->Edi = value;
-	else if (_stricmp(reg, "RSP") == 0)	threadContext->Esp = value;
-	else if (_stricmp(reg, "RBP") == 0)	threadContext->Ebp = value;
-	else if (_stricmp(reg, "RIP") == 0)	threadContext->Eip = value;
+	if (_stricmp(reg, "EAX") == 0)		threadContext->Eax = value;
+	else if (_stricmp(reg, "EBX") == 0)	threadContext->Ebx = value;
+	else if (_stricmp(reg, "ECX") == 0)	threadContext->Ecx = value;
+	else if (_stricmp(reg, "EDX") == 0)	threadContext->Edx = value;
+	else if (_stricmp(reg, "ESI") == 0)	threadContext->Esi = value;
+	else if (_stricmp(reg, "EDI") == 0)	threadContext->Edi = value;
+	else if (_stricmp(reg, "ESP") == 0)	threadContext->Esp = value;
+	else if (_stricmp(reg, "EBP") == 0)	threadContext->Ebp = value;
+	else if (_stricmp(reg, "EIP") == 0)	threadContext->Eip = value;
 	//else if (_stricmp(reg, "R8") == 0)	threadContext->R8 = value;
 	//else if (_stricmp(reg, "R9") == 0)	threadContext->R9 = value;
 	//else if (_stricmp(reg, "R10") == 0)	threadContext->R10 = value;
