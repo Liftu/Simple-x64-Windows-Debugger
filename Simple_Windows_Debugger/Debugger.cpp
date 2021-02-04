@@ -1,10 +1,15 @@
 #include "Debugger.h"
+#include <iostream>//
 
 Debugger::Debugger()
 {
 	this->isDebuggerActive = FALSE;
-	this->processID = NULL;
 	this->hProcess = NULL;
+	this->processID = NULL;
+	this->hThread = NULL;
+	this->threadID = NULL;
+	this->processStatus = ProcessStatus::NONE;
+	this->continueStatus = DBG_CONTINUE;
 	this->firstBreakpointOccured = FALSE;
 	// Get the default memory page size.
 	SYSTEM_INFO systemInfo;
@@ -20,72 +25,248 @@ Debugger::~Debugger()
 	}
 }
 
-VOID Debugger::runProcess()
+BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
 {
-	while (this->isDebuggerActive)
+	// Checks if a process isn't already being debugged
+	if (this->processStatus == ProcessStatus::NONE)
 	{
-		this->getDebugEvent();
+		STARTUPINFO startupInfo;
+		// Clean all the members of startupInfo.
+		ZeroMemory(&startupInfo, sizeof(startupInfo));
+		// Provide the size of startupInfo to cb.
+		startupInfo.cb = sizeof(startupInfo);
+		startupInfo.dwFlags = STARTF_USESHOWWINDOW;
+		startupInfo.wShowWindow = SW_HIDE;
+
+		PROCESS_INFORMATION processInformation;
+
+		if (CreateProcess(executablePath, arguments, NULL, NULL, NULL, 
+			DEBUG_ONLY_THIS_PROCESS | CREATE_NEW_CONSOLE | CREATE_SUSPENDED, 
+			NULL, NULL, &startupInfo, &processInformation))
+		{
+			this->hProcess = processInformation.hProcess;
+			this->processID = processInformation.dwProcessId;
+			this->hThread = processInformation.hThread;
+			this->threadID = processInformation.dwThreadId;
+			this->processStatus = ProcessStatus::SUSPENDED;
+			this->isDebuggerActive = true;
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+BOOL Debugger::attachProcess(DWORD pid)
+{
+	this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+
+	if (DebugActiveProcess(pid))
+	{
+		this->isDebuggerActive = TRUE;
+		this->processID = pid;
+		this->processStatus = ProcessStatus::RUNNING;
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
 	}
 }
 
-VOID Debugger::getDebugEvent()
+BOOL Debugger::detachProcess()
 {
-	DEBUG_EVENT debugEvent;
-	if (WaitForDebugEvent(&debugEvent, INFINITE))
+	if (DebugActiveProcessStop(this->processID))
 	{
-		DWORD continueStatus = DBG_CONTINUE;
-		//HANDLE hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, debugEvent.dwThreadId);
-		//LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
+		this->isDebuggerActive = FALSE;
+		this->processStatus = ProcessStatus::NONE;
+		return TRUE;
+	}
+	else
+	{
+		return FALSE;
+	}
+}
 
-		//std::cout << "Event code : " << debugEvent.dwDebugEventCode << std::endl;
-
-		if (debugEvent.dwDebugEventCode == EXCEPTION_DEBUG_EVENT)
+BOOL Debugger::continueProcess()
+{
+	if (this->processStatus != ProcessStatus::NONE)
+	{
+		if (this->processStatus == ProcessStatus::SUSPENDED)
 		{
-			DWORD exceptionCode = debugEvent.u.Exception.ExceptionRecord.ExceptionCode;
+			ResumeThread(this->hThread);
+		}
+		else
+		{
+			ContinueDebugEvent(this->processID, this->threadID, this->continueStatus);
+		}
 
-			if (exceptionCode == EXCEPTION_ACCESS_VIOLATION)
+		DEBUG_EVENT debugEvent;
+		while (WaitForDebugEvent(&debugEvent, INFINITE))
+		{
+			if (this->debugEventHandler(&debugEvent))
 			{
-				//std::cout << "Exception access violation at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+				ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, this->continueStatus);
 			}
-			else if (exceptionCode == EXCEPTION_BREAKPOINT)
-			{	// This exception is for software breakpoints
-				continueStatus = this->softwareBreakpointExceptionHandler(debugEvent);
-			}
-			else if (exceptionCode == EXCEPTION_SINGLE_STEP)
-			{	// This exception is for hardware breakpoints
-				continueStatus = this->hardwareBreakpointExceptionHandler(debugEvent);
-			}
-			else if (exceptionCode == EXCEPTION_GUARD_PAGE)
-			{	// This exception is for memory breakpoints
-				continueStatus = this->memoryBreakpointExceptionHandler(debugEvent);
-			}
-			else
-			{	// Unhandled exceptions
-				//std::cout << "Exception not handled at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
-				continueStatus = DBG_EXCEPTION_NOT_HANDLED;
+			else 
+			{
+				break;
 			}
 		}
-		else if (debugEvent.dwDebugEventCode == EXIT_PROCESS_DEBUG_EVENT)
-		{
-			this->isDebuggerActive = FALSE;
-		}
-
-		ContinueDebugEvent(debugEvent.dwProcessId, debugEvent.dwThreadId, continueStatus);
+		return TRUE;
 	}
+	return FALSE;
 }
 
-#include <iostream>//
-DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
+Debugger::ProcessStatus Debugger::getProcessStatus()
 {
-	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
+	return this->processStatus;
+}
+
+BOOL Debugger::debugEventHandler(const DEBUG_EVENT* debugEvent)
+{
+	switch (debugEvent->dwDebugEventCode)
+	{
+	case CREATE_PROCESS_DEBUG_EVENT:
+		return this->createProcessDebugEventHandler(debugEvent);
+
+	case CREATE_THREAD_DEBUG_EVENT:
+		return this->createThreadDebugEventHandler(debugEvent);
+
+	case EXCEPTION_DEBUG_EVENT:
+		return this->exceptionDebugEventHandler(debugEvent);
+
+	case EXIT_PROCESS_DEBUG_EVENT:
+		return this->exitProcessDebugEventHandler(debugEvent);
+		
+	case EXIT_THREAD_DEBUG_EVENT:
+		return this->exitThreadDebugEventHandler(debugEvent);
+
+	case LOAD_DLL_DEBUG_EVENT:
+		return this->loadDllDebugEventHandler(debugEvent);
+
+	case UNLOAD_DLL_DEBUG_EVENT:
+		return this->unloadDllDebugEventHandler(debugEvent);
+
+	case OUTPUT_DEBUG_STRING_EVENT:
+		return this->outputDebugStringEventHandler(debugEvent);
+
+	case RIP_EVENT:
+		return this->RIPEventHandler(debugEvent);
+
+	default:
+		this->logEvent("Unknown debug event.\n");
+		return FALSE;
+	}
+	return true;
+}
+
+BOOL Debugger::exceptionDebugEventHandler(const DEBUG_EVENT* debugEvent)
+{
+	switch (debugEvent->u.Exception.ExceptionRecord.ExceptionCode)
+	{
+	case EXCEPTION_ACCESS_VIOLATION:
+		//std::cout << "Exception access violation at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+		this->logEvent("Accedd violation debug event.\n");
+		this->processStatus = ProcessStatus::INTERRUPTED;
+		return FALSE;
+
+	case EXCEPTION_BREAKPOINT:
+		//This exception is for software breakpoints
+		return this->softwareBreakpointExceptionHandler(debugEvent);
+
+	case EXCEPTION_SINGLE_STEP:
+		// This exception is for hardware breakpoints
+		return this->hardwareBreakpointExceptionHandler(debugEvent);
+
+	case EXCEPTION_GUARD_PAGE:
+		// This exception is for memory breakpoints
+		return this->memoryBreakpointExceptionHandler(debugEvent);
+
+	default:
+		// Unhandled exceptions
+		//std::cout << "Exception not handled at address : 0x" << std::hex << exceptionAddress << std::dec << std::endl;
+		this->logEvent("Unhandled debug event.\n");
+		this->processStatus = ProcessStatus::INTERRUPTED;
+		return FALSE;;
+	}
+
+}
+
+BOOL Debugger::createProcessDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("Process created.\n");
+	return TRUE;
+}
+
+BOOL Debugger::createThreadDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("A new thread has been created.\n");
+	return TRUE;
+}
+
+BOOL Debugger::exitProcessDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("Process exited.\n");
+	this->processStatus = ProcessStatus::NONE;
+	return this->isDebuggerActive = FALSE;
+}
+
+BOOL Debugger::exitThreadDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("A thread has been exited.\n");
+	return TRUE;
+}
+
+BOOL Debugger::loadDllDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("Load dll [");
+	if (debugEvent->u.LoadDll.lpImageName != NULL)
+	{
+		// May be necessary to inscrease the maximum size of the string.
+		LPTSTR dllName = (LPTSTR)malloc(sizeof(LPTSTR) * MAX_PATH);
+		GetFinalPathNameByHandle(debugEvent->u.LoadDll.hFile, dllName, MAX_PATH, FILE_NAME_NORMALIZED);
+		this->logEvent(dllName);
+	}
+	else
+	{
+		this->logEvent("Unknown");
+	}
+	this->logEvent("]\n");
+	return TRUE;
+}
+
+BOOL Debugger::unloadDllDebugEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("Unload dll");
+	return TRUE;
+}
+
+BOOL Debugger::outputDebugStringEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("A debug string has been outputed.\n");
+	return FALSE;
+}
+
+BOOL Debugger::RIPEventHandler(const DEBUG_EVENT * debugEvent)
+{
+	this->logEvent("A RIP event occured.\n");
+	return FALSE;
+}
+
+BOOL Debugger::softwareBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent)
+{
+	PVOID exceptionAddress = debugEvent->u.Exception.ExceptionRecord.ExceptionAddress;
 	std::cout << std::hex << "Exception software breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+
+	this->threadID = debugEvent->dwThreadId;
+	this->hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, this->threadID);
 
 	if (this->softwareBreakpoints.count(exceptionAddress))
 	{
 		// We restore the changed byte and delete the breakpoint.
 		this->delSoftwareBreakpoint(exceptionAddress);
 		// We have to go back of 1 byte backward because the INT3 instruction got executed.
-		this->setRegister(debugEvent.dwThreadId, "RIP", (DWORD64)exceptionAddress);
+		this->setRegister(debugEvent->dwThreadId, "RIP", (DWORD64)exceptionAddress);
 	}
 	else
 	{
@@ -95,37 +276,42 @@ DWORD Debugger::softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 			this->firstBreakpointOccured = TRUE;
 		}
 	}
-	return DBG_CONTINUE;
+	return TRUE;
 }
 
-DWORD Debugger::hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
+BOOL Debugger::hardwareBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent)
 {
-	PVOID exceptionAddress = debugEvent.u.Exception.ExceptionRecord.ExceptionAddress;
+	PVOID exceptionAddress = debugEvent->u.Exception.ExceptionRecord.ExceptionAddress;
 	std::cout << std::hex << "Exception hardware breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
 
-	LPCONTEXT threadContext = this->getThreadContext(debugEvent.dwThreadId);
+	this->threadID = debugEvent->dwThreadId;
+	this->hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, this->threadID);
+	LPCONTEXT threadContext = this->getThreadContext(debugEvent->dwThreadId);
 	
 	BYTE slot;
 	// DR6 set one of its 4 first bits corresponding to the breakpoint has been hit (DR0-DR3)
-	if ((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
+	if		((threadContext->Dr6 & 0x1) && this->hardwareBreakpoints.count(0)) slot = 0;
 	else if ((threadContext->Dr6 & 0x2) && this->hardwareBreakpoints.count(1)) slot = 1;
 	else if ((threadContext->Dr6 & 0x4) && this->hardwareBreakpoints.count(2)) slot = 2;
 	else if ((threadContext->Dr6 & 0x8) && this->hardwareBreakpoints.count(3)) slot = 3;
 	else // not a hardware breakpoint
 	{ 
-		return DBG_COMMAND_EXCEPTION;
+		return TRUE;
 	}
 
 	// Removes the hardware breakpoint
 	this->delHardwareBreakpoint(slot);
 
-	return DBG_CONTINUE;
+	return TRUE;
 }
 
-DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
+BOOL Debugger::memoryBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent)
 {
-	LPVOID exceptionAddress = (LPVOID)debugEvent.u.Exception.ExceptionRecord.ExceptionInformation[1];
+	LPVOID exceptionAddress = (LPVOID)debugEvent->u.Exception.ExceptionRecord.ExceptionInformation[1];
 	std::cout << std::hex << "Exception memory breakpoint at address : 0x" << exceptionAddress << std::dec << std::endl;//
+
+	this->threadID = debugEvent->dwThreadId;
+	this->hThread = OpenThread(THREAD_ALL_ACCESS, FALSE, this->threadID);
 
 	MemoryBreakpoints::iterator breakpoint = this->memoryBreakpoints.find(exceptionAddress);
 	if (breakpoint != this->memoryBreakpoints.end())
@@ -142,14 +328,14 @@ DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 			//	DWORD oldProtect;
 			//	VirtualProtectEx(this->hProcess, exceptionAddressPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect);
 			//}
-			//return DBG_CONTINUE;
+			//return TRUE;
 		}
 		else
 		{
 			this->delMemoryBreakpoint(exceptionAddress);
 		}
 
-		return DBG_CONTINUE;
+		return TRUE;
 	}
 	else
 	{
@@ -164,63 +350,9 @@ DWORD Debugger::memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent)
 		//	DWORD oldProtect;
 		//	VirtualProtectEx(this->hProcess, exceptionAddressPage, 1, memoryBasicInfo.Protect | PAGE_GUARD, &oldProtect);
 		//}
-		//return DBG_CONTINUE;
+		//return TRUE;
 	}
-	return DBG_CONTINUE;
-}
-
-BOOL Debugger::loadProcess(LPCTSTR executablePath, LPTSTR arguments)
-{
-	STARTUPINFO startupInfo;
-	// Clean all the members of startupInfo.
-	ZeroMemory(&startupInfo, sizeof(startupInfo));
-	// Provide the size of startupInfo to cb.
-	startupInfo.cb = sizeof(startupInfo);
-	startupInfo.dwFlags = STARTF_USESHOWWINDOW;
-	startupInfo.wShowWindow = SW_HIDE;
-
-	PROCESS_INFORMATION processInformation;
-
-	if (CreateProcess(executablePath, arguments, NULL, NULL, NULL, DEBUG_PROCESS, NULL, NULL, &startupInfo, &processInformation))
-	{
-		this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processInformation.dwProcessId);
-		this->isDebuggerActive = true;
-		this->processID = processInformation.dwProcessId;
-		return TRUE;
-	}
-	else
-	{
-		return FALSE;
-	}
-}
-
-BOOL Debugger::attachProcess(DWORD pid)
-{
-	this->hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
-	
-	if (DebugActiveProcess(pid))
-	{
-		this->isDebuggerActive = TRUE;
-		this->processID = pid;
-		return TRUE;
-	}
-	else
-	{
-		return FALSE;
-	}
-}
-
-BOOL Debugger::detachProcess()
-{
-	if (DebugActiveProcessStop(this->processID))
-	{
-		this->isDebuggerActive = FALSE;
-		return TRUE;
-	}
-	else
-	{
-		return FALSE;
-	}
+	return TRUE;
 }
 
 UINT Debugger::enumerateThreads(THREADENTRY32* threadEntryArray[])
@@ -514,4 +646,10 @@ BOOL Debugger::delMemoryBreakpoint(LPVOID address)
 		return TRUE;
 	}
 	return FALSE;
+}
+
+VOID Debugger::logEvent(LPCTSTR message)
+{
+	// Just print it on stdout for now.
+	std::cout << message;
 }
