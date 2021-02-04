@@ -14,7 +14,7 @@ void attach()
 	std::cin >> pid;
 	if (debugger.attachProcess(pid)) 
 	{
-		std::cout << "process attached to " << pid << std::endl;
+		//std::cout << "process attached to " << pid << std::endl;
 	}
 }
 
@@ -22,7 +22,7 @@ void load()
 {
 	if (debugger.loadProcess("C:\\Users\\louis\\source\\repos\\Test_C\\x64\\Release\\Test_C.exe", (LPTSTR)"toto toto tata"))
 	{
-		std::cout << "process loaded " << std::endl;
+		//std::cout << "process loaded " << std::endl;
 	}
 }
 
@@ -52,16 +52,16 @@ int main(int argc, char* argv[])
 	
 	load();
 	//attach();
-	debugger.addMemoryBreakpoint((LPVOID)0x00007FF67BC22200, 0, TRUE);
-	debugger.addMemoryBreakpoint((LPVOID)0x00007FF67BC22202, 0, TRUE);
-	debugger.delMemoryBreakpoint((LPVOID)0x00007FF67BC22200);
-	debugger.addHardwareBreakpoint((LPVOID)0x00007FF67BC21027, 1, HW_EXECUTE, TRUE);
-	debugger.addSoftwareBreakpoint((LPVOID)0x00007FF67BC21057, TRUE);
-	debugger.runProcess();
+	//debugger.addMemoryBreakpoint((LPVOID)0x0000016022BB549F, 0, TRUE);
+	//debugger.addMemoryBreakpoint((LPVOID)0x00007FF722202200, 0, TRUE);
+	//debugger.delMemoryBreakpoint((LPVOID)0x00007FF722202200);
+	debugger.addHardwareBreakpoint((LPVOID)0x00007FF6486F1027, 1, HW_EXECUTE, TRUE);
+	debugger.addSoftwareBreakpoint((LPVOID)0x00007FF6486F1057, TRUE);
+	debugger.continueProcess();
 
 	//dumpThreadRegisters();
 
-	debugger.detachProcess();
+	//debugger.detachProcess();
 
 	system("PAUSE");
 	return 0;

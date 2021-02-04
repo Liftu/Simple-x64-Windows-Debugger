@@ -16,11 +16,20 @@ public:
 	Debugger();
 	~Debugger();
 
-	// Processes //
-	VOID runProcess();
+	// Process //
+	enum class ProcessStatus
+	{
+		NONE,
+		SUSPENDED,
+		INTERRUPTED,
+		RUNNING
+	};
+
 	BOOL loadProcess(LPCTSTR executablePath, LPTSTR arguments);
 	BOOL attachProcess(DWORD pid);
 	BOOL detachProcess();
+	BOOL continueProcess();
+	Debugger::ProcessStatus getProcessStatus();
 
 	// Threads/contexts //
 	UINT enumerateThreads(THREADENTRY32* threadEntryArray[]);
@@ -36,16 +45,32 @@ public:
 	BOOL addMemoryBreakpoint(LPVOID address, /*DWORD size, */BYTE condition, BOOL isPersistent);
 	BOOL delMemoryBreakpoint(LPVOID address);
 
-private:
-	VOID getDebugEvent();
 
-	DWORD softwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
-	DWORD hardwareBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
-	DWORD memoryBreakpointExceptionHandler(DEBUG_EVENT debugEvent);
+private:
+	VOID logEvent(LPCTSTR message);
+
+	BOOL debugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL exceptionDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL createProcessDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL createThreadDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL exitProcessDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL exitThreadDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL loadDllDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL unloadDllDebugEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL outputDebugStringEventHandler(const DEBUG_EVENT* debugEvent);
+	BOOL RIPEventHandler(const DEBUG_EVENT* debugEvent);
+
+	BOOL softwareBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent);
+	BOOL hardwareBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent);
+	BOOL memoryBreakpointExceptionHandler(const DEBUG_EVENT* debugEvent);
 
 	BOOL isDebuggerActive;
-	UINT processID;
 	HANDLE hProcess;
+	DWORD processID;
+	HANDLE hThread;
+	DWORD threadID;
+	ProcessStatus processStatus;
+	DWORD continueStatus;
 	BOOL firstBreakpointOccured;
 	DWORD pageSize;
 
